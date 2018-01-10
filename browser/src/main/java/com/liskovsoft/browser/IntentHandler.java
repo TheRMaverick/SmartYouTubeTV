@@ -15,8 +15,9 @@ import android.util.Log;
 import android.util.Patterns;
 
 import com.liskovsoft.browser.UI.ComboViews;
+import com.liskovsoft.browser.helpers.DeviceUtils;
 import com.liskovsoft.browser.search.SearchEngine;
-import com.liskovsoft.browser.custom.Search;
+import com.liskovsoft.browser.helpers.Search;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -56,6 +57,8 @@ public class IntentHandler {
     }
 
     void onNewIntent(Intent intent) {
+        DeviceUtils.wakeUpDevice(mController.getContext());
+
         Uri uri = intent.getData();
         if (uri != null && isForbiddenUri(uri)) {
             Log.e(TAG, "Aborting intent with forbidden uri, \"" + uri + "\"");
@@ -76,9 +79,14 @@ public class IntentHandler {
         }
         final String action = intent.getAction();
         final int flags = intent.getFlags();
-        if (Intent.ACTION_MAIN.equals(action) ||
+        if ((Intent.ACTION_MAIN.equals(action) && uri == null)  ||
                 (flags & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) {
             // just resume the browser
+            return;
+        }
+        if (Intent.ACTION_MAIN.equals(action) && uri != null)
+        {
+            current.loadUrl(uri.toString(), null);
             return;
         }
         if (BrowserActivity.ACTION_SHOW_BOOKMARKS.equals(action)) {

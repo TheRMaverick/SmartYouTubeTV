@@ -5,9 +5,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
+import android.widget.TextView;
 import android.widget.Toast;
-import cat.ereza.logcatreporter.LogcatReporter;
 import com.crashlytics.android.Crashlytics;
+import com.crashlytics.android.core.CrashlyticsCore;
+import com.liskovsoft.smartyoutubetv.BuildConfig;
 import com.liskovsoft.smartyoutubetv.R;
 import com.liskovsoft.smartyoutubetv.flavors.exoplayer.SmartYouTubeTVExoWebView;
 import com.liskovsoft.smartyoutubetv.flavors.exoplayer.SmartYouTubeTVExoXWalk;
@@ -20,7 +22,7 @@ public class BootstrapActivity extends ActivityBase {
     public static final String FROM_BOOTSTRAP = "FROM_BOOTSTRAP";
     public static final String SKIP_RESTORE = "skip_restore";
     private SmartPreferences mPrefs;
-    private LanguageSelector mLangSelector;
+    private LanguageSelectorDialog mLangSelector;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,8 +34,16 @@ public class BootstrapActivity extends ActivityBase {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_bootstrap);
         initButtons();
+        initVersion();
 
         setupCrashLogs();
+    }
+
+    private void initVersion() {
+        TextView title = findViewById(R.id.bootstrap_title_message);
+        CharSequence oldTitle = title.getText();
+        String finalTitle = String.format("%s (%s)", oldTitle, BuildConfig.VERSION_NAME);
+        title.setText(finalTitle);
     }
 
     private void initPrefs() {
@@ -45,6 +55,7 @@ public class BootstrapActivity extends ActivityBase {
     private void initButtons() {
         initCheckbox(R.id.chk_save_selection, mPrefs.getBootstrapSaveSelection());
         initCheckbox(R.id.chk_autoframerate, mPrefs.getBootstrapAutoframerate());
+        initCheckbox(R.id.chk_update_check, mPrefs.getBootstrapUpdateCheck());
     }
 
     private void initCheckbox(int id, boolean isChecked) {
@@ -54,7 +65,7 @@ public class BootstrapActivity extends ActivityBase {
 
     public void onClick(View button) {
         if (mLangSelector == null) {
-            mLangSelector = new LanguageSelector(this);
+            mLangSelector = new LanguageSelectorDialog(this);
         }
 
         switch (button.getId()) {
@@ -62,8 +73,7 @@ public class BootstrapActivity extends ActivityBase {
                 mLangSelector.run();
                 break;
             case R.id.btn_send_crash_report:
-                Toast.makeText(this, R.string.sending_crash_report, Toast.LENGTH_LONG).show();
-                LogcatReporter.reportExceptionWithLogcat(new SendCrashReportException());
+                Toast.makeText(this, "Dummy crash report message", Toast.LENGTH_LONG).show();
                 break;
         }
     }
@@ -75,6 +85,9 @@ public class BootstrapActivity extends ActivityBase {
                 break;
             case R.id.chk_autoframerate:
                 mPrefs.setBootstrapAutoframerate(b);
+                break;
+            case R.id.chk_update_check:
+                mPrefs.setBootstrapUpdateCheck(b);
                 break;
         }
     }
@@ -93,9 +106,13 @@ public class BootstrapActivity extends ActivityBase {
         }
     }
 
+    /**
+     * Detect {@link Crashlytics} from the property file. See <em>build.gradle</em>. <a href="https://docs.fabric.io/android/crashlytics/build-tools.html">More info</a>
+     */
     private void setupCrashLogs() {
-        Fabric.with(this, new Crashlytics());
-        LogcatReporter.install(3000); // crashlytics logcat addon
+        if (BuildConfig.CRASHLYTICS_ENABLED) {
+            Fabric.with(this, new Crashlytics());
+        }
     }
 
     private void setupLang() {

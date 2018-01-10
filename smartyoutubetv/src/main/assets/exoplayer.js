@@ -36,7 +36,8 @@ function GoogleButton() {
     this.playButtonSelector = ".icon-player-play.toggle-button";
     this.mainControlsSelector = '.fresh-transport-controls.transport-controls';
     this.mainTitleSelector = '.title-card.watch-title-tray';
-    this.keysContainerSelector = '#watch';
+    this.keysContainerSelector = '#watch'; // div that receives keys events
+    this.playerUrlTemplate = '/watch/'; // url part of the opened player
 }
 
 ////////// End GoogleButton //////////////////
@@ -151,6 +152,7 @@ function Helpers() {
     // supply selector list
     this.getButtonStates = function() {
         this.muteVideo();
+        new KeyUpDownWatcher(null); // init watcher
 
         YouButton.resetCache(); // activity just started
 
@@ -175,6 +177,7 @@ function Helpers() {
 
     this.syncButtons = function(states) {
         this.muteVideo();
+        new KeyUpDownWatcher(null); // init watcher
 
         YouButton.resetCache(); // activity just started
         console.log("Helpers.syncButtons: " + JSON.stringify(states));
@@ -309,7 +312,14 @@ function YouButton(selector) {
         return btn;
     };
 
+    this.playerIsClosed = function() {
+        return document.location.href.indexOf(this.playerUrlTemplate) === -1;
+    };
+
     this.getChecked = function() {
+        if (this.playerIsClosed())
+            return null; // element not exists (see ActionReceiver.java for details)
+
         if (this.isChecked === undefined) {
             var toggle = this.findToggle();
             var isChecked = helpers.hasClass(toggle, this.selectedClass);
@@ -321,6 +331,9 @@ function YouButton(selector) {
     };
 
     this.setChecked = function(doChecked) {
+        if (this.playerIsClosed())
+            return;
+
         var isChecked = this.getChecked();
         if (isChecked === null) {
             console.log("YouButton: button is disabled: exiting: " + this.selector);
@@ -396,15 +409,20 @@ function KeyUpDownWatcher(host) {
         var container = helpers.$(this.keysContainerSelector);
         var type = 'keydown';
         var up = 38;
+        var enter = 13;
+        var esc = 27;
         var $this = this;
 
         var myListener = function(e) {
             var code = e.keyCode;
-            if (code === up && $this.host) {
+            if (code === up && $this.host) { // up is fired only for the top row
                 $this.host.needToCloseSuggestions();
                 $this.host = null; // run once per host
+            } else if (code === enter) { // user wants to open an new video
+                $this.host = null;
             }
-            console.log("SuggestionsFakeButton: on keydown: " + code);
+
+            console.log("Watcher: SuggestionsFakeButton: on keydown: " + code);
         };
 
         container.addEventListener(type, myListener);
@@ -412,6 +430,8 @@ function KeyUpDownWatcher(host) {
         this.setHost = function(host) {
             this.host = host;
         };
+
+        console.log("Watcher: do init...");
     }
 
     KeyUpDownWatcherService.prototype = new GoogleButton();
@@ -423,6 +443,9 @@ function KeyUpDownWatcher(host) {
 }
 
 KeyUpDownWatcher.prototype = new GoogleButton();
+KeyUpDownWatcher.disable = function() {
+    new KeyUpDownWatcher(null);
+};
 
 function SuggestionsFakeButton(selector) {
     this.selector = selector;

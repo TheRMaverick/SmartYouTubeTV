@@ -18,6 +18,8 @@ import java.text.DateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.Scanner;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Helpers {
     private static OkHttpClient mClient;
@@ -127,5 +129,26 @@ public class Helpers {
             date = new Date((long) Integer.parseInt(timestamp) * 1000);
         }
         return dateFormat.format(date);
+    }
+
+    public static String runMultiMatcher(String input, String... patterns) {
+        if (input == null) {
+            return null;
+        }
+
+        Pattern regex;
+        Matcher matcher;
+        String result = null;
+        for (String pattern : patterns) {
+            regex = Pattern.compile(pattern);
+            matcher = regex.matcher(input);
+
+            if (matcher.find()) {
+                result = matcher.group(matcher.groupCount()); // get last group
+                break;
+            }
+        }
+
+        return result;
     }
 }

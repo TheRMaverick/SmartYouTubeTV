@@ -1,12 +1,9 @@
 package com.liskovsoft.smartyoutubetv.flavors.exoplayer.player;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Build.VERSION;
 import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.NonNull;
@@ -14,16 +11,13 @@ import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.view.ViewTreeObserver.OnGlobalLayoutListener;
-import android.view.WindowManager.LayoutParams;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.TextView;
 import android.widget.Toast;
 import com.google.android.exoplayer2.C;
+import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.ExoPlaybackException;
-import com.google.android.exoplayer2.ExoPlayer.EventListener;
 import com.google.android.exoplayer2.ExoPlayerFactory;
 import com.google.android.exoplayer2.PlaybackParameters;
 import com.google.android.exoplayer2.Player;
@@ -52,19 +46,20 @@ import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.trackselection.MappingTrackSelector.MappedTrackInfo;
 import com.google.android.exoplayer2.trackselection.TrackSelection;
 import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
-import com.google.android.exoplayer2.ui.TimeBar;
+import com.google.android.exoplayer2.upstream.DefaultAllocator;
 import com.liskovsoft.exoplayeractivity.R;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.custom.AutoFrameRateManager;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.displaymode.AutoFrameRateManager;
 import com.google.android.exoplayer2.ui.PlaybackControlView;
 import com.google.android.exoplayer2.ui.SimpleExoPlayerView;
 import com.google.android.exoplayer2.upstream.DataSource;
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.HttpDataSource;
 import com.google.android.exoplayer2.util.Util;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.custom.DebugViewGroupHelper;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.custom.Helpers;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.custom.PlayerPresenter;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.custom.PlayerStateManager;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.addons.DebugViewGroupHelper;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.helpers.Utils;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.addons.PlayerInitializer;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.addons.PlayerButtonsManager;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.addons.PlayerStateManager;
 import com.liskovsoft.smartyoutubetv.flavors.exoplayer.widgets.ToggleButtonBase;
 import com.liskovsoft.smartyoutubetv.flavors.exoplayer.widgets.LayoutToggleButton;
 import com.liskovsoft.smartyoutubetv.flavors.exoplayer.widgets.TextToggleButton;
@@ -79,7 +74,7 @@ import java.util.UUID;
  * An activity that plays media using {@link SimpleExoPlayer}.
  */
 public class PlayerActivity extends Activity implements OnClickListener, Player.EventListener, PlaybackControlView.VisibilityListener {
-
+    private static final String TAG = PlayerActivity.class.getName();
     public static final String DRM_SCHEME_UUID_EXTRA = "drm_scheme_uuid";
     public static final String DRM_LICENSE_URL = "drm_license_url";
     public static final String DRM_KEY_REQUEST_PROPERTIES = "drm_key_request_properties";
@@ -107,9 +102,10 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
     public static final String VIDEO_DATE = "video_date";
     public static final String VIDEO_TITLE = "video_title";
     public static final String VIDEO_AUTHOR = "video_author";
-    public static final String VIDEO_VIEWS = "video_views";
+    public static final String VIDEO_VIEW_COUNT = "video_views";
     public static final String VIDEO_ID = "video_id";
     public static final String TRACK_ENDED = "track_ended";
+    public static final String DISPLAY_MODE_ID = "display_mode_id";
 
     static {
         DEFAULT_COOKIE_MANAGER = new CookieManager();
@@ -134,15 +130,12 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
     private boolean shouldAutoPlay;
     private int resumeWindow;
     private long resumePosition;
-    private OnClickListener mPrevNextListener;
-    private EventListener mPlaybackEndListener;
-    private TextView mVideoTitle;
-    private TextView mVideoTitle2;
-    private LinearLayout mPlayerTopBar;
-    private int mInterfaceVisibilityState;
-    private PlayerPresenter mPresenter;
-    private PlayerStateManager mStateManager;
-    private AutoFrameRateManager mAutoFrameRateManager;
+    private LinearLayout playerTopBar;
+    private int interfaceVisibilityState;
+    private PlayerButtonsManager buttonsManager;
+    private PlayerStateManager stateManager;
+    private AutoFrameRateManager autoFrameRateManager;
+    private PlayerInitializer playerInitializer;
 
     // Activity lifecycle
 
@@ -165,7 +158,7 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
         rootView.setOnClickListener(this);
         debugRootView = (LinearLayout) findViewById(R.id.controls_root);
         debugViewGroup = (FrameLayout) findViewById(R.id.debug_view_group);
-        mPlayerTopBar = (LinearLayout) findViewById(R.id.player_top_bar);
+        playerTopBar = (LinearLayout) findViewById(R.id.player_top_bar);
         retryButton = (TextToggleButton) findViewById(R.id.retry_button);
         retryButton.setOnClickListener(this);
 
@@ -173,179 +166,43 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
         simpleExoPlayerView.setControllerVisibilityListener(this);
         simpleExoPlayerView.requestFocus();
 
-        initPresenter();
-        initExoPlayerButtons();
-        initVideoTitle();
-        makeActivityFullscreen();
-        makeActivityHorizontal();
+        buttonsManager = new PlayerButtonsManager(this);
+        buttonsManager.syncButtonStates(); // onCheckedChanged depends on this
+        playerInitializer = new PlayerInitializer(this);
     }
 
-    private void initPresenter() {
-        mPresenter = new PlayerPresenter(this);
-        // we need to call this method after mPresenter initialization
-        mPresenter.syncButtonStates();
-    }
-
-    public void onCheckedChanged(@NonNull ToggleButtonBase compoundButton, boolean b) {
-        if (mPresenter != null)
-            mPresenter.onCheckedChanged(compoundButton, b);
-    }
-
-    private void makeActivityFullscreen() {
-        getWindow().setFlags(LayoutParams.FLAG_FULLSCREEN, LayoutParams.FLAG_FULLSCREEN);
-
-        if (VERSION.SDK_INT >= 19) {
-            View decorView = getWindow().getDecorView();
-            decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    public void showDebugView(boolean show) {
+        if (show) {
+            debugViewGroup.setVisibility(View.VISIBLE);
+            debugViewHelper.start();
+        } else {
+            debugViewGroup.setVisibility(View.GONE);
+            debugViewHelper.stop();
         }
-    }
-
-    private void makeActivityHorizontal() {
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-    }
-
-    private void initVideoTitle() {
-        mVideoTitle = (TextView)findViewById(R.id.video_title);
-        mVideoTitle.setText(getMainTitle());
-        mVideoTitle2 = (TextView)findViewById(R.id.video_title2);
-        mVideoTitle2.setText(getSecondTitle());
     }
 
     public String getMainTitle() {
-        return getIntent().getStringExtra(PlayerActivity.VIDEO_TITLE);
+        return playerInitializer.getMainTitle();
     }
 
-    private String formatViews(String num) {
-        if (num == null) {
-            return null;
-        }
-
-        long no = Long.parseLong(num);
-        String str = String.format("%,d", no);
-        return str;
-    }
-
-    public String getSecondTitle() {
-        Intent intent = getIntent();
-
-        String secondTitle = String.format(
-                "%s      %s      %s %s",
-                intent.getStringExtra(VIDEO_AUTHOR),
-                intent.getStringExtra(VIDEO_DATE),
-                formatViews(intent.getStringExtra(VIDEO_VIEWS)),
-                getString(R.string.view_count)
-        );
-
-        return secondTitle;
-    }
-
-    private void initExoPlayerButtons() {
-        initNextButton();
-        initPrevButton();
-        initTimeBar();
-        initStatsButton();
-    }
-
-    private void initStatsButton() {
-        ToggleButtonBase statsButton = (ToggleButtonBase)findViewById(R.id.exo_stats);
-        statsButton.setOnCheckedChangeListener(new ToggleButtonBase.OnCheckedChangeListener()
-        {
-            @Override
-            public void onCheckedChanged(ToggleButtonBase button, boolean isChecked) {
-                if (isChecked)
-                {
-                    debugViewGroup.setVisibility(View.VISIBLE);
-                } else {
-                    debugViewGroup.setVisibility(View.GONE);
-                }
-
-            }
-        });
-
-    }
-
-    // NOTE: example of visibility change listener
-    private void initNextButton() {
-        final View nextButton = simpleExoPlayerView.findViewById(R.id.exo_next);
-        nextButton.getViewTreeObserver().addOnGlobalLayoutListener(obtainSetButtonEnabledListener(nextButton));
-        // nextButton.setOnClickListener(obtainNextListener(nextButton));
-    }
-
-    private void initPrevButton() {
-        final View prevButton = simpleExoPlayerView.findViewById(R.id.exo_prev);
-        // prevButton.setOnClickListener(obtainPrevListener(prevButton));
-    }
-
-    private void initTimeBar() {
-        final int timeIncrementMS = 15000;
-
-        // time bar: rewind and fast forward to 15 secs
-        TimeBar timeBar = (TimeBar) simpleExoPlayerView.findViewById(R.id.exo_progress);
-        timeBar.setKeyTimeIncrement(timeIncrementMS);
-
-        // Playback control view.
-        simpleExoPlayerView.setRewindIncrementMs(timeIncrementMS);
-        simpleExoPlayerView.setFastForwardIncrementMs(timeIncrementMS);
-    }
-
-    // TODO: improve this
-    private OnGlobalLayoutListener obtainSetButtonEnabledListener(final View nextButton) {
-        return new OnGlobalLayoutListener() {
-            @Override
-            public void onGlobalLayout() {
-                setButtonEnabled(true, nextButton);
-            }
-        };
-    }
-
-    private OnClickListener obtainNextListener(final View nextButton) {
-        return new OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                    doGracefulExit(PlayerActivity.BUTTON_NEXT);
-            }
-        };
-    }
-
-    private OnClickListener obtainPrevListener(final View prevButton) {
-        return new OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                    doGracefulExit(PlayerActivity.BUTTON_PREV);
-            }
-        };
-    }
-
-    private void setButtonEnabled(boolean enabled, View view) {
-        if (view == null) {
-            return;
-        }
-        view.setEnabled(enabled);
-        if (Util.SDK_INT >= 11) {
-            setViewAlphaV11(view, enabled ? 1f : 0.3f);
-            view.setVisibility(View.VISIBLE);
-        } else {
-            view.setVisibility(enabled ? View.VISIBLE : View.INVISIBLE);
-        }
-    }
-
-    @TargetApi(11)
-    private void setViewAlphaV11(View view, float alpha) {
-        view.setAlpha(alpha);
+    public void onCheckedChanged(@NonNull ToggleButtonBase compoundButton, boolean b) {
+        if (buttonsManager != null)
+            buttonsManager.onCheckedChanged(compoundButton, b);
     }
 
     public void doGracefulExit() {
-        Intent intent = mPresenter.createResultIntent();
+        Intent intent = buttonsManager.createResultIntent();
         doGracefulExit(intent);
     }
 
     public void doGracefulExit(String action) {
-        Intent intent = mPresenter.createResultIntent();
+        Intent intent = buttonsManager.createResultIntent();
         intent.putExtra(action, true);
         doGracefulExit(intent);
     }
 
     private void doGracefulExit(Intent intent) {
+        intent.putExtra(DISPLAY_MODE_ID, autoFrameRateManager.getCurrentModeId());
         setResult(Activity.RESULT_OK, intent);
 
         finish();
@@ -362,11 +219,6 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
     @Override
     public void finish() {
         super.finish();
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
     }
 
     @Override
@@ -395,9 +247,9 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
 
     @Override
     public void onPause() {
-        if (mStateManager != null) {
-            mStateManager.persistState();
-            mStateManager = null; // force restore state
+        if (stateManager != null) {
+            stateManager.persistState();
+            stateManager = null; // force restore state
         }
 
         super.onPause();
@@ -432,7 +284,7 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
         if (isVolumeEvent(event))
             return false;
         
-        if (isBackKey(event)) {
+        if (isBackKey(event) || isUpKey(event)) {
             return handleBack(event);
         }
 
@@ -447,9 +299,18 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
         return event.getKeyCode() == KeyEvent.KEYCODE_BACK;
     }
 
+    private boolean isUpKey(KeyEvent event) {
+        boolean isUp = event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP;
+        if (isUp) {
+            View upBtn = findViewById(R.id.up_catch_button);
+            return upBtn.isFocused();
+        }
+        return false;
+    }
+
     private boolean handleBack(KeyEvent event) {
         boolean isUp = event.getAction() == KeyEvent.ACTION_UP;
-        boolean isVisible = mInterfaceVisibilityState == View.VISIBLE;
+        boolean isVisible = interfaceVisibilityState == View.VISIBLE;
 
         if (isVisible) {
             if (isUp) {
@@ -488,9 +349,9 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
 
     @Override
     public void onVisibilityChange(int visibility) {
-        mInterfaceVisibilityState = visibility;
+        interfaceVisibilityState = visibility;
 
-        mPlayerTopBar.setVisibility(visibility);
+        playerTopBar.setVisibility(visibility);
 
         // NOTE: don't set to GONE or you will get fathom events
         if (visibility == View.VISIBLE)
@@ -506,7 +367,7 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
 
     // Internal methods
 
-    private void initializePlayer() {
+    public void initializePlayer() {
         Intent intent = getIntent();
         boolean needNewPlayer = player == null;
         if (needNewPlayer) {
@@ -517,11 +378,11 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
                 @Override
                 protected TrackSelection[] selectTracks(RendererCapabilities[] rendererCapabilities, TrackGroupArray[] rendererTrackGroupArrays,
                                                         int[][][] rendererFormatSupports) throws ExoPlaybackException {
-                    
 
-                    if (mStateManager == null) { // run once
-                        mStateManager = new PlayerStateManager(PlayerActivity.this, player, trackSelector);
-                        mStateManager.restoreState(rendererTrackGroupArrays);
+
+                    if (stateManager == null) { // run once
+                        stateManager = new PlayerStateManager(PlayerActivity.this, player, trackSelector);
+                        stateManager.restoreState(rendererTrackGroupArrays);
                     }
 
                     forceAllFormatsSupport(rendererFormatSupports);
@@ -555,6 +416,11 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
                 }
             };
 
+            // NOTE: 'Tunneled video playback' (HDR and others) (https://medium.com/google-exoplayer/tunneled-video-playback-in-exoplayer-84f084a8094d)
+            // Enable tunneling if supported by the current media and device configuration.
+            if (Util.SDK_INT >= 21)
+                trackSelector.setTunnelingAudioSessionId(C.generateAudioSessionIdV21(this));
+
             trackSelectionHelper = new TrackSelectionHelper(trackSelector, adaptiveTrackSelectionFactory);
             lastSeenTrackGroupArray = null;
             eventLogger = new EventLogger(trackSelector);
@@ -580,6 +446,11 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
                     .EXTENSION_RENDERER_MODE_ON) : DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF;
             DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this, drmSessionManager, extensionRendererMode);
 
+            DefaultLoadControl loadControl = new DefaultLoadControl(new DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE),
+                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS / 3,
+                    DefaultLoadControl.DEFAULT_MAX_BUFFER_MS / 3,
+                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS);
             player = ExoPlayerFactory.newSimpleInstance(renderersFactory, trackSelector);
             player.addListener(this);
             player.addListener(eventLogger);
@@ -590,18 +461,17 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
             simpleExoPlayerView.setPlayer(player);
             player.setPlayWhenReady(shouldAutoPlay);
             debugViewHelper = new DebugViewGroupHelper(player, debugViewGroup, PlayerActivity.this);
-            debugViewHelper.start();
+            autoFrameRateManager = new AutoFrameRateManager(this, player);
 
-            mAutoFrameRateManager = new AutoFrameRateManager(this, player);
+            //playerInitializer.applySyncFix(player, trackSelector);
+            //playerInitializer.applySyncFix(player);
         }
         if (needNewPlayer || needRetrySource) {
             String action = intent.getAction();
             Uri[] uris;
             String[] extensions;
             if (ACTION_VIEW.equals(action)) {
-                //TODO: modified
                 uris = new Uri[]{intent.getData()};
-                //uris = new Uri[]{intent.getData(), Uri.parse("http://fakeurl.com")};
 
                 //TODO: modified
                 extensions = new String[]{intent.getStringExtra(EXTENSION_EXTRA)};
@@ -626,23 +496,20 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
             }
             MediaSource[] mediaSources = new MediaSource[uris.length];
             for (int i = 0; i < uris.length; i++) {
-                // TODO: modified
+                // NOTE: supply audio and video tracks in one field
                 String[] split = uris[i].toString().split(DELIMITER);
                 if (split.length == 2) {
                     mediaSources[i] = new MergingMediaSource(buildMediaSource(Uri.parse(split[0]), null), buildMediaSource(Uri.parse(split[1]),
                             null));
                     continue;
                 }
-                // TODO: modified
+                // NOTE: supply audio and video tracks in one field
                 if (intent.getStringExtra(MPD_CONTENT_EXTRA) != null) {
                     mediaSources[i] = buildMPDMediaSource(uris[i], intent.getStringExtra(MPD_CONTENT_EXTRA));
                     continue;
                 }
                 mediaSources[i] = buildMediaSource(uris[i], extensions[i]);
             }
-            // TODO: modified
-            //MediaSource mediaSource = mediaSources.length == 1 ? new LoopingMediaSource(mediaSources[0]) :
-            //        new LoopingMediaSource(new ConcatenatingMediaSource(mediaSources));
 
             MediaSource mediaSource = mediaSources.length == 1 ? mediaSources[0] : new ConcatenatingMediaSource(mediaSources);
 
@@ -656,8 +523,7 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
             updateButtonVisibilities();
         }
     }
-
-    // TODO: modified
+    
     private MediaSource buildMPDMediaSource(Uri uri, String mpdContent) {
         // Are you using FrameworkSampleSource or ExtractorSampleSource when you build your player?
         return new DashMediaSource(getManifest(uri, mpdContent), new DefaultDashChunkSource.Factory(mediaDataSourceFactory),
@@ -668,10 +534,9 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
         DashManifestParser parser = new DashManifestParser();
         DashManifest result;
         try {
-            result = parser.parse(uri, Helpers.toStream(mpdContent));
+            result = parser.parse(uri, Utils.toStream(mpdContent));
         } catch (IOException e) {
-            e.printStackTrace();
-            throw new IllegalStateException(e);
+            throw new IllegalStateException("Malformed mpd file:\n" + mpdContent, e);
         }
         return result;
     }
@@ -767,14 +632,25 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
         if (playbackState == Player.STATE_ENDED) {
             doGracefulExit(PlayerActivity.TRACK_ENDED);
         }
+
         if (playbackState == Player.STATE_READY) {
             getAutoFrameRateManager().apply();
         }
+
+        if (errorWhileClickedOnPlayButton()) {
+            initializePlayer();
+        }
+
         updateButtonVisibilities();
     }
 
+    private boolean errorWhileClickedOnPlayButton() {
+        View pauseBtn = findViewById(R.id.exo_pause);
+        return needRetrySource && pauseBtn.isFocused();
+    }
+
     public AutoFrameRateManager getAutoFrameRateManager() {
-        return mAutoFrameRateManager;
+        return autoFrameRateManager;
     }
 
     @Override
@@ -924,5 +800,11 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
             cause = cause.getCause();
         }
         return false;
+    }
+
+    void retryIfNeeded() {
+        if (needRetrySource) {
+            initializePlayer();
+        }
     }
 }

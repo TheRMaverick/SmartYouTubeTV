@@ -15,8 +15,13 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.AsyncTask;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
+import android.widget.Toast;
+import edu.mit.mobile.android.appupdater.addons.MyDownloadManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -362,7 +367,7 @@ class MyXWalkLibraryLoader {
             mListener = listener;
             mContext = context;
             mDownloadUrl = url;
-            mDownloadManager = new MyDownloadManager();
+            mDownloadManager = new MyDownloadManager(mContext);
         }
 
         @Override
@@ -370,6 +375,15 @@ class MyXWalkLibraryLoader {
             Log.d(TAG, "DownloadManagerTask started, " + mDownloadUrl);
             sActiveTask = this;
             mListener.onDownloadStarted();
+        }
+
+        private void showMessage(final String msg) {
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(mContext, msg, Toast.LENGTH_LONG).show();
+                }
+            });
         }
 
         @Override
@@ -381,6 +395,10 @@ class MyXWalkLibraryLoader {
 
             // NOTE: Android 6.0 fix
             File downloadDir = mContext.getExternalCacheDir();
+            if (downloadDir == null) { // try to use SDCard
+                downloadDir = Environment.getExternalStorageDirectory();
+                showMessage("Please, make sure that SDCard is mounted");
+            }
 
             File downloadFile = new File(downloadDir, savedFile);
             if (downloadFile.isFile()) downloadFile.delete();
@@ -433,270 +451,6 @@ class MyXWalkLibraryLoader {
                 int error = DownloadManager.ERROR_UNKNOWN;
                 mListener.onDownloadFailed(result, error);
             }
-        }
-    }
-
-    private static class DownloadManagerTaskNew extends AsyncTask<Void, Integer, Integer> {
-        private static final int QUERY_INTERVAL_MS = 100;
-        private static final int MAX_PAUSED_COUNT = 6000; // 10 minutes
-
-        private DownloadListener mListener;
-        private Context mContext;
-        private String mDownloadUrl;
-        private String mApkPath;
-
-        DownloadManagerTaskNew(DownloadListener listener, Context context, String url) {
-            super();
-            mListener = listener;
-            mContext = context;
-            mDownloadUrl = url;
-        }
-
-        @Override
-        protected void onPreExecute() {
-            Log.d(TAG, "DownloadManagerTask started, " + mDownloadUrl);
-            sActiveTask = this;
-
-            mListener.onDownloadStarted();
-        }
-
-        private String downloadPackage(String uri) {
-            // NOTE: Android 6.0 fix
-            File cacheDir = mContext.getExternalCacheDir();
-            if (cacheDir == null) {
-                return null;
-            }
-            cacheDir.mkdirs();
-            File outputFile = new File(cacheDir, "update.apk");
-            try {
-                URL url = new URL(uri);
-                HttpURLConnection c = (HttpURLConnection) url.openConnection();
-                c.setRequestMethod("GET");
-                c.setDoOutput(false);
-                c.connect();
-
-                if (outputFile.exists()) {
-                    outputFile.delete();
-                }
-                FileOutputStream fos = new FileOutputStream(outputFile);
-
-                InputStream is = c.getInputStream();
-
-                byte[] buffer = new byte[1024];
-                int len1 = 0;
-                while ((len1 = is.read(buffer)) != -1) {
-                    fos.write(buffer, 0, len1);
-                }
-                fos.close();
-                is.close();
-
-            } catch (IOException e) {
-                Log.e("UpdateAPP", e.toString());
-                throw new IllegalStateException(e);
-            }
-            return outputFile.getAbsolutePath();
-        }
-
-        @Override
-        protected Integer doInBackground(Void... params) {
-            if (mDownloadUrl == null) return DownloadManager.STATUS_FAILED;
-
-            mApkPath = downloadPackage(mDownloadUrl);
-
-            if (mApkPath != null) {
-                return DownloadManager.STATUS_SUCCESSFUL;
-            }
-
-            return DownloadManager.STATUS_FAILED;
-        }
-
-        @Override
-        protected void onProgressUpdate(Integer... progress) {
-            Log.d(TAG, "DownloadManagerTask updated: " + progress[0] + "/" + progress[1]);
-            int percentage = 0;
-            if (progress[1] > 0) percentage = (int) (progress[0] * 100.0 / progress[1]);
-            mListener.onDownloadUpdated(percentage);
-        }
-
-        @Override
-        protected void onCancelled(Integer result) {
-            Log.d(TAG, "DownloadManagerTask cancelled");
-            sActiveTask = null;
-            mListener.onDownloadCancelled();
-        }
-
-        @Override
-        protected void onPostExecute(Integer result) {
-            Log.d(TAG, "DownloadManagerTask finished, " + result);
-            sActiveTask = null;
-
-            if (result == DownloadManager.STATUS_SUCCESSFUL) {
-                Uri uri = Uri.fromFile(new File(mApkPath));
-                Log.d(TAG, "Uri for downloaded file:" + uri.toString());
-
-                mListener.onDownloadCompleted(uri);
-            } else {
-                int error = DownloadManager.ERROR_UNKNOWN;
-                mListener.onDownloadFailed(result, error);
-            }
-        }
-
-        private boolean isSilentDownload() {
-            try {
-                PackageManager packageManager = mContext.getPackageManager();
-                PackageInfo packageInfo = packageManager.getPackageInfo(
-                        mContext.getPackageName(), PackageManager.GET_PERMISSIONS);
-                return Arrays.asList(packageInfo.requestedPermissions).contains(
-                        DOWNLOAD_WITHOUT_NOTIFICATION);
-            } catch (NameNotFoundException | NullPointerException e) {
-            }
-            return false;
-        }
-    }
-
-    private static class DownloadManagerTaskOld extends AsyncTask<Void, Integer, Integer> {
-        private static final int QUERY_INTERVAL_MS = 100;
-        private static final int MAX_PAUSED_COUNT = 6000; // 10 minutes
-
-        private DownloadListener mListener;
-        private Context mContext;
-        private String mDownloadUrl;
-        private DownloadManager mDownloadManager;
-        private long mDownloadId;
-
-        DownloadManagerTaskOld(DownloadListener listener, Context context, String url) {
-            super();
-            mListener = listener;
-            mContext = context;
-            mDownloadUrl = url;
-            mDownloadManager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        }
-
-        @Override
-        protected void onPreExecute() {
-            Log.d(TAG, "DownloadManagerTask started, " + mDownloadUrl);
-            sActiveTask = this;
-
-            String savedFile = DEFAULT_DOWNLOAD_FILE_NAME;
-
-            // NOTE: Android 6.0 fix
-            File downloadDir = mContext.getExternalCacheDir();
-
-            File downloadFile = new File(downloadDir, savedFile);
-            if (downloadFile.isFile()) downloadFile.delete();
-
-            Request request = new Request(Uri.parse(mDownloadUrl));
-
-            // NOTE: Android 6.0 fix
-            request.setDestinationUri(Uri.fromFile(downloadFile));
-
-            if (isSilentDownload()) {
-                request.setNotificationVisibility(Request.VISIBILITY_HIDDEN);
-            }
-            mDownloadId = mDownloadManager.enqueue(request);
-
-            mListener.onDownloadStarted();
-        }
-
-        @Override
-        protected Integer doInBackground(Void... params) {
-            if (mDownloadUrl == null) return DownloadManager.STATUS_FAILED;
-
-            Query query = new Query().setFilterById(mDownloadId);
-            int pausedCount = 0;
-
-            while (!isCancelled()) {
-                try {
-                    Thread.sleep(QUERY_INTERVAL_MS);
-                } catch (InterruptedException e) {
-                    break;
-                }
-
-                Cursor cursor = mDownloadManager.query(query);
-                if (cursor == null || !cursor.moveToFirst()) continue;
-
-                int totalIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES);
-                int downloadIdx = cursor.getColumnIndex(
-                        DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR);
-                int totalSize = cursor.getInt(totalIdx);
-                int downloadSize = cursor.getInt(downloadIdx);
-                if (totalSize > 0) publishProgress(downloadSize, totalSize);
-
-                int statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
-                int status = cursor.getInt(statusIdx);
-                if (status == DownloadManager.STATUS_FAILED ||
-                        status == DownloadManager.STATUS_SUCCESSFUL) {
-                    return status;
-                } else if (status == DownloadManager.STATUS_PAUSED) {
-                    if (++pausedCount == MAX_PAUSED_COUNT) return status;
-                }
-            }
-
-            return DownloadManager.STATUS_RUNNING;
-        }
-
-        @Override
-        protected void onProgressUpdate(Integer... progress) {
-            Log.d(TAG, "DownloadManagerTask updated: " + progress[0] + "/" + progress[1]);
-            int percentage = 0;
-            if (progress[1] > 0) percentage = (int) (progress[0] * 100.0 / progress[1]);
-            mListener.onDownloadUpdated(percentage);
-        }
-
-        @Override
-        protected void onCancelled(Integer result) {
-            mDownloadManager.remove(mDownloadId);
-
-            Log.d(TAG, "DownloadManagerTask cancelled");
-            sActiveTask = null;
-            mListener.onDownloadCancelled();
-        }
-
-        @Override
-        protected void onPostExecute(Integer result) {
-            Log.d(TAG, "DownloadManagerTask finished, " + result);
-            sActiveTask = null;
-
-            if (result == DownloadManager.STATUS_SUCCESSFUL) {
-                Uri uri = mDownloadManager.getUriForDownloadedFile(mDownloadId);
-                Log.d(TAG, "Uri for downloaded file:" + uri.toString());
-
-                if (uri.getScheme().equals("content")) {
-                    Query query = new Query().setFilterById(mDownloadId);
-                    Cursor cursor = mDownloadManager.query(query);
-                    if (cursor != null && cursor.moveToFirst()) {
-                        //int index = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_FILENAME);
-                        // NOTE: Android 7.0 fix
-                        int index = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
-                        uri = Uri.parse(cursor.getString(index));
-                    }
-                }
-
-                mListener.onDownloadCompleted(uri);
-            } else {
-                int error = DownloadManager.ERROR_UNKNOWN;
-                if (result == DownloadManager.STATUS_FAILED) {
-                    Query query = new Query().setFilterById(mDownloadId);
-                    Cursor cursor = mDownloadManager.query(query);
-                    if (cursor != null && cursor.moveToFirst()) {
-                        int reasonIdx = cursor.getColumnIndex(DownloadManager.COLUMN_REASON);
-                        error = cursor.getInt(reasonIdx);
-                    }
-                }
-                mListener.onDownloadFailed(result, error);
-            }
-        }
-
-        private boolean isSilentDownload() {
-            try {
-                PackageManager packageManager = mContext.getPackageManager();
-                PackageInfo packageInfo = packageManager.getPackageInfo(
-                        mContext.getPackageName(), PackageManager.GET_PERMISSIONS);
-                return Arrays.asList(packageInfo.requestedPermissions).contains(
-                        DOWNLOAD_WITHOUT_NOTIFICATION);
-            } catch (NameNotFoundException | NullPointerException e) {
-            }
-            return false;
         }
     }
 

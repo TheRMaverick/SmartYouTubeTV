@@ -18,3 +18,5 @@ tmp/
 /build
 /captures
 .externalNativeBuild
+fabric.properties
+*BAK.java

@@ -5,14 +5,16 @@ import android.content.pm.ActivityInfo;
 import android.net.Uri;
 import android.os.Build.VERSION;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager.LayoutParams;
+import android.widget.Toast;
 import com.liskovsoft.browser.Controller;
-import com.liskovsoft.browser.custom.MainBrowserActivity;
-import com.liskovsoft.browser.custom.SimpleUIController;
+import com.liskovsoft.browser.addons.MainBrowserActivity;
+import com.liskovsoft.browser.addons.SimpleUIController;
 import com.liskovsoft.smartyoutubetv.bootstrap.BootstrapActivity;
 import com.liskovsoft.smartyoutubetv.events.ControllerEventListener;
 import com.liskovsoft.smartyoutubetv.misc.Helpers;
@@ -21,16 +23,16 @@ import com.liskovsoft.smartyoutubetv.misc.LangUpdater;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class SmartYouTubeTVActivityBase extends MainBrowserActivity {
+    private static final String TAG = SmartYouTubeTVActivityBase.class.getSimpleName();
     private Controller mController;
     private String mServiceUrl; // youtube url here
     private Map<String, String> mHeaders;
     private KeysTranslator mTranslator;
     private final static String DIAL_EXTRA = "com.amazon.extra.DIAL_PARAM";
-    private final String mLGSmartTVUserAgent = "Mozilla/5.0 (Unknown; Linux armv7l) AppleWebKit/537.1+ (KHTML, like Gecko) Safari/537.1+ LG Browser/6.00.00(+mouse+3D+SCREEN+TUNER; LGE; 42LA660S-ZA; 04.25.05; 0x00000001;); LG NetCast.TV-2013 /04.25.05 (LG, 42LA660S-ZA, wired)";
+    private final static String mLGSmartTVUserAgent = "Mozilla/5.0 (Unknown; Linux armv7l) AppleWebKit/537.1+ (KHTML, like Gecko) Safari/537.1+ LG Browser/6.00.00(+mouse+3D+SCREEN+TUNER; LGE; 42LA660S-ZA; 04.25.05; 0x00000001;); LG NetCast.TV-2013 /04.25.05 (LG, 42LA660S-ZA, wired)";
+    private final static String TEMPLATE_URL = "https://www.youtube.com/tv#?%s";
 
     @Override
     protected void onCreate(Bundle icicle) {
@@ -71,15 +73,13 @@ public class SmartYouTubeTVActivityBase extends MainBrowserActivity {
 
     private void createController(Bundle icicle) {
         mHeaders = new HashMap<>();
-        //TODO: remove
-        //mPageLoadHandler = new MyPageLoadHandler(this);
         mHeaders.put("user-agent", mLGSmartTVUserAgent);
 
         mController = new SimpleUIController(this);
         mController.setEventListener(new ControllerEventListener(this, mTranslator));
         mController.setDefaultUrl(Uri.parse(mServiceUrl));
         mController.setDefaultHeaders(mHeaders);
-        Intent intent = (icicle == null) ? transformIntent(getIntent()) : null;
+        Intent intent = (icicle == null) ? transformIntentData(getIntent()) : null;
         // TODO: remove
         //mPageDefaults = new PageDefaults(mYouTubeTVUrl, mHeaders, mPageLoadHandler, new MyControllerEventHandler(mController));
         mController.start(intent);
@@ -151,7 +151,7 @@ public class SmartYouTubeTVActivityBase extends MainBrowserActivity {
 
     @Override
     protected void onNewIntent(Intent intent) {
-        super.onNewIntent(transformIntent(intent));
+        super.onNewIntent(transformIntentData(intent));
     }
 
     @Override
@@ -175,17 +175,17 @@ public class SmartYouTubeTVActivityBase extends MainBrowserActivity {
     ///////////////////////// Begin Youtube filter /////////////////////
 
 
-    private Intent transformIntent(Intent intent) {
+    private Intent transformIntentData(Intent intent) {
         if (intent == null)
             return null;
 
-        transformRegularIntent(intent);
-        transformAmazonIntent(intent);
+        transformRegularIntentData(intent);
+        transformAmazonIntentData(intent);
 
         return intent;
     }
 
-    private void transformRegularIntent(Intent intent) {
+    private void transformRegularIntentData(Intent intent) {
         Uri data = intent.getData();
         if (data == null) {
             return;
@@ -195,53 +195,53 @@ public class SmartYouTubeTVActivityBase extends MainBrowserActivity {
     }
 
     // see Amazon's youtube apk: "org.chromium.youtube_apk.YouTubeActivity.loadStartPage(dialParam)"
-    private void transformAmazonIntent(Intent intent) {
+    private void transformAmazonIntentData(Intent intent) {
         String dialParam = intent.getStringExtra(DIAL_EXTRA);
         if (dialParam == null) {
             return;
         }
 
-        intent.setData(Uri.parse("https://www.youtube.com/tv?gl=us&hl=en-us&" + dialParam));
+        String uriString = String.format(TEMPLATE_URL, dialParam);
+        intent.setData(Uri.parse(uriString));
     }
 
-    private String runMultiMatcher(String input, String[] patterns) {
-        Pattern regex;
-        Matcher matcher;
-        String result = null;
-        for (String pattern : patterns) {
-            regex = Pattern.compile(pattern);
-            matcher = regex.matcher(input);
-
-            if (matcher.find()) {
-                result = matcher.group(1);
-                break;
-            }
-        }
-
-        return result;
-    }
-
+    /**
+     * Extracts video params e.g. <code>v=xtx33RuFCik</code> from url
+     * <br/>
+     * Examples of the input/output url:
+     * <pre>
+     * origin video: https://www.youtube.com/watch?v=xtx33RuFCik
+     * needed video: https://www.youtube.com/tv#/watch/video/control?v=xtx33RuFCik
+     * needed video: https://www.youtube.com/tv?gl=us&hl=en-us&v=xtx33RuFCik
+     * needed video: https://www.youtube.com/tv?v=xtx33RuFCik
+     *
+     * origin playlist: https://www.youtube.com/playlist?list=PLbl01QFpbBY1XGwNb8SBmoA3hshpK1pZj
+     * needed playlist: https://www.youtube.com/tv#/watch/video/control?list=PLbl01QFpbBY1XGwNb8SBmoA3hshpK1pZj&resume
+     * </pre>
+     * @param url desktop url (see manifest file for the patterns)
+     * @return video params
+     */
     private String extractVideoParamsFromUrl(String url) {
-        // origin video: https://www.youtube.com/watch?v=xtx33RuFCik
-        // needed video: https://www.youtube.com/tv#/watch/video/control?v=xtx33RuFCik
-
-        // origin playlist: https://www.youtube.com/playlist?list=PLbl01QFpbBY1XGwNb8SBmoA3hshpK1pZj
-        // needed playlist: https://www.youtube.com/tv#/watch/video/control?list=PLbl01QFpbBY1XGwNb8SBmoA3hshpK1pZj&resume
-
-        String[] patterns = {"(list=\\w*)", "(v=\\w*)", "/(\\w*)$"};
-        return runMultiMatcher(url, patterns);
+        String[] patterns = {"list=\\w*", "v=\\w*", "youtu.be/\\w*"};
+        String res = Helpers.runMultiMatcher(url, patterns);
+        if (res == null) {
+            Log.w(TAG, "Url not supported: " + url);
+            // Uncomment next section to debug
+            // Toast.makeText(this, "Url not supported: " + url, Toast.LENGTH_LONG).show();
+            return null;
+        }
+        return res.replace("youtu.be/", "v=");
     }
 
     private Uri transformUri(final Uri uri) {
         if (uri == null)
             return null;
         String url = uri.toString();
-        String videoId = extractVideoParamsFromUrl(url);
-        if (videoId == null) {
-            return uri;
+        String videoParam = extractVideoParamsFromUrl(url);
+        if (videoParam == null) {
+            return Uri.parse(mServiceUrl);
         }
-        String videoUrlTemplate = "https://www.youtube.com/tv#/watch/video/control?%s";
-        String format = String.format(videoUrlTemplate, videoId);
+        String format = String.format(TEMPLATE_URL, videoParam);
         return Uri.parse(format);
     }
 
