@@ -21,6 +21,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 import android.widget.Toast;
+import edu.mit.mobile.android.appupdater.addons.Helpers;
 import edu.mit.mobile.android.appupdater.addons.MyDownloadManager;
 
 import java.io.File;
@@ -413,7 +414,12 @@ class MyXWalkLibraryLoader {
                 }
             });
 
-            mDownloadId = mDownloadManager.enqueue(request);
+            try {
+                mDownloadId = mDownloadManager.enqueue(request);
+            } catch (IllegalStateException ex) {
+                Log.e(TAG, ex.getMessage(), ex);
+                Helpers.showMessage(mContext, ex.getCause(), TAG);
+            }
 
             return isDone ? DownloadManager.STATUS_SUCCESSFUL : DownloadManager.STATUS_FAILED;
         }
@@ -443,10 +449,16 @@ class MyXWalkLibraryLoader {
             sActiveTask = null;
 
             if (result == DownloadManager.STATUS_SUCCESSFUL) {
-                Uri uri = mDownloadManager.getUriForDownloadedFile(mDownloadId);
-                Log.d(TAG, "Uri for downloaded file:" + uri.toString());
+                try {
+                    Uri uri = mDownloadManager.getUriForDownloadedFile(mDownloadId);
+                    Log.d(TAG, "Uri for downloaded file:" + uri.toString());
 
-                mListener.onDownloadCompleted(uri);
+                    mListener.onDownloadCompleted(uri);
+                } catch (IllegalStateException ex) {
+                    Log.e(TAG, ex.getMessage(), ex);
+                    Helpers.showMessage(mContext, ex.getCause(), TAG);
+                    mListener.onDownloadFailed(result, DownloadManager.ERROR_UNKNOWN);
+                }
             } else {
                 int error = DownloadManager.ERROR_UNKNOWN;
                 mListener.onDownloadFailed(result, error);

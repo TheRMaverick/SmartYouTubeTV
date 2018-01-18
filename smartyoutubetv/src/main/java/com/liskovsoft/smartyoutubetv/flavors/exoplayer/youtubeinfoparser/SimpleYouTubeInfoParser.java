@@ -1,9 +1,11 @@
 package com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser;
 
 import android.net.Uri;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.mpdbuilder.MyMPDBuilder;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.misc.YouTubeGenericInfo;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.misc.YouTubeMediaItem;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.mpdbuilder.SimpleMPDBuilder;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.SimpleYouTubeInfoVisitable;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.YouTubeMediaParser.GenericInfo;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.YouTubeMediaParser.MediaItem;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.YouTubeSubParser.Subtitle;
 import com.liskovsoft.smartyoutubetv.misc.Helpers;
 
 import java.io.InputStream;
@@ -12,35 +14,32 @@ public class SimpleYouTubeInfoParser implements YouTubeInfoParser {
     private final String[] mContent;
 
     private class MergeMediaVisitor extends YouTubeInfoVisitor {
-        private final String mType;
         private final OnMediaFoundCallback mMediaFoundCallback;
-        private MyMPDBuilder mMPDBuilder;
+        private SimpleMPDBuilder mMPDBuilder;
         private int mCounter = 1;
-        private YouTubeGenericInfo mInfo;
+        private GenericInfo mInfo;
         private Uri mHlsUrl;
 
         public MergeMediaVisitor(OnMediaFoundCallback mediaFoundCallback) {
-            this(null, mediaFoundCallback);
-        }
-
-        public MergeMediaVisitor(String type, OnMediaFoundCallback mediaFoundCallback) {
-            mType = type;
             mMediaFoundCallback = mediaFoundCallback;
         }
 
         @Override
-        public void onGenericInfo(YouTubeGenericInfo info) {
+        public void onGenericInfo(GenericInfo info) {
             if (mMPDBuilder == null)
-                mMPDBuilder = new MyMPDBuilder(info);
+                mMPDBuilder = new SimpleMPDBuilder(info);
 
             mInfo = info;
         }
 
         @Override
-        public void onMediaItem(YouTubeMediaItem mediaItem) {
-            if (mediaItem.belongsToType(mType)) {
-                mMPDBuilder.append(mediaItem);
-            }
+        public void onMediaItem(MediaItem mediaItem) {
+            mMPDBuilder.append(mediaItem);
+        }
+
+        @Override
+        public void onSubItem(Subtitle item) {
+            mMPDBuilder.append(item);
         }
 
         @Override
@@ -66,6 +65,10 @@ public class SimpleYouTubeInfoParser implements YouTubeInfoParser {
         }
     }
 
+    /**
+     * One or multiple <em>get_video_info</em> files as a source
+     * @param content get_video_info content
+     */
     public SimpleYouTubeInfoParser(InputStream ...content) {
         mContent = new String[content.length];
         readContent(content);
@@ -78,13 +81,12 @@ public class SimpleYouTubeInfoParser implements YouTubeInfoParser {
     }
 
     @Override
-    public void setOnMediaFoundCallback(OnMediaFoundCallback mpdFoundCallback) {
+    public void parse(OnMediaFoundCallback mpdFoundCallback) {
         YouTubeInfoVisitor visitor = new MergeMediaVisitor(mpdFoundCallback);
 
         for (String content : mContent) {
             YouTubeInfoVisitable visitable = new SimpleYouTubeInfoVisitable(content);
             visitable.accept(visitor);
         }
-
     }
 }

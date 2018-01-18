@@ -43,7 +43,6 @@ import com.liskovsoft.smartyoutubetv.flavors.exoplayer.player.helpers.PlayerUtil
 
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -70,6 +69,7 @@ import java.util.TreeSet;
     private CheckedTextView defaultView;
     private CheckedTextView enableRandomAdaptationView;
     private CheckedTextView autoframerateView;
+    private CheckedTextView hideErrorsView;
     private CheckedTextView[][] trackViews;
     private AlertDialog alertDialog;
     private Context context;
@@ -80,8 +80,18 @@ import java.util.TreeSet;
             Format format1 = (Format) view1.getTag(R.string.track_view_format);
             Format format2 = (Format) view2.getTag(R.string.track_view_format);
 
+            // sort subtitles by language code
+            if (format1.language != null) {
+                return format1.language.compareTo(format2.language);
+            }
+
             int leftVal = format2.width + (int) format2.frameRate + (format2.codecs.contains("avc") ? 31 : 0);
             int rightVal = format1.width + (int) format1.frameRate + (format1.codecs.contains("avc") ? 31 : 0);
+
+            int delta = leftVal - rightVal;
+            if (delta == 0) {
+                return format2.bitrate - format1.bitrate;
+            }
 
             return leftVal - rightVal;
         }
@@ -133,6 +143,18 @@ import java.util.TreeSet;
         TypedArray attributeArray = context.getTheme().obtainStyledAttributes(new int[]{android.R.attr.selectableItemBackground});
         int selectableItemBackgroundResourceId = attributeArray.getResourceId(0, 0);
         attributeArray.recycle();
+
+        // View for Autoframerate checkbox.
+        hideErrorsView = (CheckedTextView) inflater.inflate(android.R.layout.simple_list_item_multiple_choice, root, false);
+        hideErrorsView.setBackgroundResource(selectableItemBackgroundResourceId);
+        hideErrorsView.setText(R.string.hide_playback_errors);
+        hideErrorsView.setFocusable(true);
+        hideErrorsView.setOnClickListener(this);
+        hideErrorsView.setTextSize(TypedValue.COMPLEX_UNIT_PX, context.getResources().getDimension(R.dimen.dialog_text_size));
+        if (rendererIndex == VIDEO_GROUP_INDEX) { // is video
+            root.addView(hideErrorsView);
+            root.addView(inflater.inflate(R.layout.list_divider, root, false));
+        }
 
         // View for Autoframerate checkbox.
         autoframerateView = (CheckedTextView) inflater.inflate(android.R.layout.simple_list_item_multiple_choice, root, false);
@@ -256,6 +278,8 @@ import java.util.TreeSet;
         AutoFrameRateManager autoFrameRateManager = ((PlayerActivity) context).getAutoFrameRateManager();
         autoframerateView.setChecked(autoFrameRateManager.getEnabled());
 
+        hideErrorsView.setChecked(((PlayerActivity) context).getHidePlaybackErrors());
+
         disableView.setChecked(isDisabled);
         defaultView.setChecked(!isDisabled && override == null);
         for (int i = 0; i < trackViews.length; i++) {
@@ -301,6 +325,10 @@ import java.util.TreeSet;
             boolean checked = autoframerateView.isChecked();
             AutoFrameRateManager autoFrameRateManager = ((PlayerActivity) context).getAutoFrameRateManager();
             autoFrameRateManager.setEnabled(!checked);
+        } else if (view == hideErrorsView) {
+            boolean checked = hideErrorsView.isChecked();
+            PlayerActivity player = (PlayerActivity) context;
+            player.setHidePlaybackErrors(!checked);
         } else { // change quality
             isDisabled = false;
             @SuppressWarnings("unchecked") Pair<Integer, Integer> tag = (Pair<Integer, Integer>) view.getTag();

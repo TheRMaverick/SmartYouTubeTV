@@ -339,8 +339,12 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
         } else if (view.getParent() == debugRootView) {
             MappedTrackInfo mappedTrackInfo = trackSelector.getCurrentMappedTrackInfo();
             if (mappedTrackInfo != null) {
-                trackSelectionHelper.showSelectionDialog(this, ((TextToggleButton) view).getText(), trackSelector.getCurrentMappedTrackInfo(), (int) view
-                        .getTag());
+                trackSelectionHelper.showSelectionDialog(
+                        this,
+                        ((TextToggleButton) view).getText(),
+                        trackSelector.getCurrentMappedTrackInfo(),
+                        (int) view.getTag()
+                );
             }
         }
     }
@@ -416,10 +420,11 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
                 }
             };
 
+            // Commented out because of bug: can't instantiate OMX decoder...
             // NOTE: 'Tunneled video playback' (HDR and others) (https://medium.com/google-exoplayer/tunneled-video-playback-in-exoplayer-84f084a8094d)
             // Enable tunneling if supported by the current media and device configuration.
-            if (Util.SDK_INT >= 21)
-                trackSelector.setTunnelingAudioSessionId(C.generateAudioSessionIdV21(this));
+            //if (Util.SDK_INT >= 21)
+            //    trackSelector.setTunnelingAudioSessionId(C.generateAudioSessionIdV21(this));
 
             trackSelectionHelper = new TrackSelectionHelper(trackSelector, adaptiveTrackSelectionFactory);
             lastSeenTrackGroupArray = null;
@@ -461,10 +466,13 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
             simpleExoPlayerView.setPlayer(player);
             player.setPlayWhenReady(shouldAutoPlay);
             debugViewHelper = new DebugViewGroupHelper(player, debugViewGroup, PlayerActivity.this);
+
+            // Do not move this code to another place!!! This statement must come after player initialization
             autoFrameRateManager = new AutoFrameRateManager(this, player);
 
-            //playerInitializer.applySyncFix(player, trackSelector);
-            //playerInitializer.applySyncFix(player);
+            // applied one time at player's initialization
+            //playerInitializer.applySurfaceFix(player, trackSelector);
+            //playerInitializer.applySurfaceFix(player);
         }
         if (needNewPlayer || needRetrySource) {
             String action = intent.getAction();
@@ -473,9 +481,7 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
             if (ACTION_VIEW.equals(action)) {
                 uris = new Uri[]{intent.getData()};
 
-                //TODO: modified
                 extensions = new String[]{intent.getStringExtra(EXTENSION_EXTRA)};
-                //extensions = new String[]{intent.getStringExtra(EXTENSION_EXTRA), "m3u8"};
             } else if (ACTION_VIEW_LIST.equals(action)) {
                 String[] uriStrings = intent.getStringArrayExtra(URI_LIST_EXTRA);
                 uris = new Uri[uriStrings.length];
@@ -523,7 +529,7 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
             updateButtonVisibilities();
         }
     }
-    
+
     private MediaSource buildMPDMediaSource(Uri uri, String mpdContent) {
         // Are you using FrameworkSampleSource or ExtractorSampleSource when you build your player?
         return new DashMediaSource(getManifest(uri, mpdContent), new DefaultDashChunkSource.Factory(mediaDataSourceFactory),
@@ -634,7 +640,8 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
         }
 
         if (playbackState == Player.STATE_READY) {
-            getAutoFrameRateManager().apply();
+            autoFrameRateManager.apply();
+            playerInitializer.initTimeBar(player); // set proper time increments
         }
 
         if (errorWhileClickedOnPlayButton()) {
@@ -699,7 +706,7 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
                 }
             }
         }
-        if (errorString != null) {
+        if (errorString != null && !getHidePlaybackErrors()) {
             showToast(errorString);
         }
         needRetrySource = true;
@@ -754,20 +761,24 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
             TrackGroupArray trackGroups = mappedTrackInfo.getTrackGroups(i);
             if (trackGroups.length != 0) {
                 TextToggleButton button = new TextToggleButton(this);
-                int label;
+                int label, id;
                 switch (player.getRendererType(i)) {
                     case C.TRACK_TYPE_AUDIO:
+                        id = R.id.exo_audio;
                         label = R.string.audio;
                         break;
                     case C.TRACK_TYPE_VIDEO:
+                        id = R.id.exo_video;
                         label = R.string.video;
                         break;
                     case C.TRACK_TYPE_TEXT:
+                        id = R.id.exo_captions2;
                         label = R.string.text;
                         break;
                     default:
                         continue;
                 }
+                button.setId(id);
                 button.setText(label);
                 button.setTag(i);
                 button.setOnClickListener(this);
@@ -806,5 +817,15 @@ public class PlayerActivity extends Activity implements OnClickListener, Player.
         if (needRetrySource) {
             initializePlayer();
         }
+    }
+
+    public void setHidePlaybackErrors(boolean hideErrors) {
+        ExoPreferences prefs = ExoPreferences.instance(this);
+        prefs.setHidePlaybackErrors(hideErrors);
+    }
+
+    public boolean getHidePlaybackErrors() {
+        ExoPreferences prefs = ExoPreferences.instance(this);
+        return prefs.getHidePlaybackErrors();
     }
 }

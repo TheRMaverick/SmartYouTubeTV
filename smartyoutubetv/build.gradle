@@ -29,8 +29,8 @@ android {
         minSdkVersion project.properties.minSdkVersion
         targetSdkVersion project.properties.targetSdkVersion
         applicationId "com.firsthash.smartyoutubetv2"
-        versionCode 200
-        versionName "6.12.40"
+        versionCode 208
+        versionName "6.12.48"
         multiDexEnabled = true
 
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
@@ -42,9 +42,6 @@ android {
         debug {
             buildConfigField "boolean", "CRASHLYTICS_ENABLED", crashEnabled.toString()
             ext.enableCrashlytics = crashEnabled
-
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
         release {
             buildConfigField "boolean", "CRASHLYTICS_ENABLED", crashEnabled.toString()
@@ -124,4 +121,13 @@ dependencies {
     compile project.properties.ottoVersion
 
     compile project.properties.gsonVersion
+    compile project.properties.jsonPathVersion
+
+    // view dependencies: gradlew -q app:dependencies
+    // Details: https://docs.gradle.org/current/dsl/org.gradle.api.artifacts.ResolutionStrategy.html
+    configurations.all {
+        resolutionStrategy {
+            force project.properties.asmVersion // resolve 'jsonPath' conflicts
+        }
+    }
 }

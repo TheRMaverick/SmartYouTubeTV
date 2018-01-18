@@ -16,11 +16,10 @@
 package edu.mit.mobile.android.appupdater.addons;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Environment;
-import android.os.Handler;
-import android.os.Looper;
-import android.widget.Toast;
 import okhttp3.Dns;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
@@ -33,13 +32,6 @@ import okio.BufferedSource;
 import okio.ForwardingSource;
 import okio.Okio;
 import okio.Source;
-import org.xbill.DNS.ARecord;
-import org.xbill.DNS.Lookup;
-import org.xbill.DNS.Record;
-import org.xbill.DNS.Resolver;
-import org.xbill.DNS.SimpleResolver;
-import org.xbill.DNS.TextParseException;
-import org.xbill.DNS.Type;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -47,8 +39,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -69,90 +61,87 @@ import java.util.concurrent.TimeUnit;
  * }</pre>
  */
 public final class MyDownloadManager {
+    private static final String TAG = MyDownloadManager.class.getSimpleName();
     private final Context mContext;
+    private final OkHttpClient mClient;
     private MyRequest mRequest;
     private long mRequestId;
     private GoogleResolver mResolver;
     private InputStream mResponseStream;
 
-    private class GoogleResolver {
-        private static final String GOOGLE_DNS = "8.8.8.8";
-
-        public List<InetAddress> resolve(String host) {
-            List<InetAddress> hostIPs = new ArrayList<>();
-            try {
-                Resolver resolver = new SimpleResolver(GOOGLE_DNS);
-                Lookup lookup = new Lookup(host, Type.A);
-                lookup.setResolver(resolver);
-                Record[] records = lookup.run();
-                for (Record record : records) {
-                    hostIPs.add(((ARecord) record).getAddress());
-                }
-            } catch (UnknownHostException | TextParseException ex) {
-                showMessage(ex.getMessage());
-                throw new IllegalStateException(ex);
-            }
-            return hostIPs;
-        }
-    }
-
     public MyDownloadManager(Context context) {
         mContext = context;
-        mResolver = new GoogleResolver();
+        mResolver = new GoogleResolver(context);
+        mClient = createOkHttpClient();
     }
 
     private void run() {
+        if (!isNetworkAvailable()) {
+            Helpers.showMessage(mContext, "Internet connection not available");
+        }
+
         String url = mRequest.mDownloadUri.toString();
 
         Request request = new Request.Builder()
                 .url(url)
                 .build();
 
-        OkHttpClient client = new OkHttpClient.Builder()
-            .addNetworkInterceptor(new Interceptor() {
-                @Override
-                public Response intercept(Chain chain) throws IOException {
-                    Response originalResponse = chain.proceed(chain.request());
-                    return originalResponse.newBuilder().body(new ProgressResponseBody(originalResponse.body(), mRequest.mProgressListener)).build();
-                }
-            })
-            .dns(new Dns() {
-                @Override
-                public List<InetAddress> lookup(String hostname) throws UnknownHostException {
-                    return mResolver.resolve(hostname);
-                }
-            })
-            .connectTimeout(10, TimeUnit.SECONDS)
-              .readTimeout(10, TimeUnit.SECONDS)
-              .writeTimeout(10, TimeUnit.SECONDS)
-              .build();
+        for (int tries = 3; tries > 0; tries--) {
+            try {
+                Response response = mClient.newCall(request).execute();
+                if (!response.isSuccessful()) throw new IllegalStateException("Unexpected code " + response);
 
-        try {
-            Response response = client.newCall(request).execute();
-            if (!response.isSuccessful()) throw new IllegalStateException("Unexpected code " + response);
-
-            // NOTE: actual downloading is going here (while reading a stream)
-            mResponseStream = new ByteArrayInputStream(response.body().bytes());
-        } catch (IOException ex) {
-            showMessage(ex.getMessage());
-            throw new IllegalStateException(ex);
+                // NOTE: actual downloading is going here (while reading a stream)
+                mResponseStream = new ByteArrayInputStream(response.body().bytes());
+                break; // no exception is thrown - job is done
+            } catch (SocketTimeoutException ex) {
+                if (tries == 1) // swallow 3 times
+                    throw new IllegalStateException(ex);
+            } catch (IOException ex) {
+                throw new IllegalStateException(ex);
+            }
         }
+
+    }
+
+    private OkHttpClient createOkHttpClient() {
+        return new OkHttpClient.Builder()
+                .addNetworkInterceptor(new Interceptor() {
+                    @Override
+                    public Response intercept(Chain chain) throws IOException {
+                        Response originalResponse = chain.proceed(chain.request());
+                        return originalResponse.newBuilder().body(new ProgressResponseBody(originalResponse.body(), mRequest.mProgressListener)).build();
+                    }
+                })
+                .dns(new Dns() {
+                    @Override
+                    public List<InetAddress> lookup(String hostname) throws UnknownHostException {
+                        List<InetAddress> hosts = mResolver.resolve(hostname);
+                        return hosts.isEmpty() ? Dns.SYSTEM.lookup(hostname) : hosts; // use system dns as a fallback
+                    }
+                })
+                .connectTimeout(10, TimeUnit.SECONDS)
+                  .readTimeout(10, TimeUnit.SECONDS)
+                  .writeTimeout(10, TimeUnit.SECONDS)
+                  .build();
     }
 
     private Uri streamToFile(InputStream is, Uri destination) {
+        FileOutputStream fos = null;
+
         try {
-            FileOutputStream fos = new FileOutputStream(destination.getPath());
+            fos = new FileOutputStream(destination.getPath());
 
             byte[] buffer = new byte[1024];
             int len1;
             while ((len1 = is.read(buffer)) != -1) {
                 fos.write(buffer, 0, len1);
             }
-            fos.close();
-            is.close();
         } catch (IOException ex) {
-            showMessage(ex.getMessage());
             throw new IllegalStateException(ex);
+        } finally {
+            Helpers.closeStream(fos);
+            Helpers.closeStream(is);
         }
 
         return destination;
@@ -167,19 +156,10 @@ public final class MyDownloadManager {
         File cacheDir = mContext.getExternalCacheDir();
         if (cacheDir == null) { // try to use SDCard
             cacheDir = Environment.getExternalStorageDirectory();
-            showMessage("Please, make sure that SDCard is mounted");
+            Helpers.showMessage(mContext,"Please, make sure that SDCard is mounted");
         }
         File outputFile = new File(cacheDir, "tmp_file");
         return Uri.fromFile(outputFile);
-    }
-
-    private void showMessage(final String msg) {
-        new Handler(Looper.getMainLooper()).post(new Runnable() {
-            @Override
-            public void run() {
-                Toast.makeText(mContext, msg, Toast.LENGTH_LONG).show();
-            }
-        });
     }
 
     public long enqueue(MyRequest request) {
@@ -190,7 +170,7 @@ public final class MyDownloadManager {
     }
 
     public void remove(long downloadId) {
-        throw new IllegalStateException("Method not implemented!");
+        mClient.dispatcher().cancelAll();
     }
 
     public Uri getUriForDownloadedFile(long requestId) {
@@ -199,6 +179,13 @@ public final class MyDownloadManager {
 
     public InputStream getStreamForDownloadedFile(long requestId) {
         return mResponseStream;
+    }
+
+    private boolean isNetworkAvailable() {
+        ConnectivityManager connectivityManager
+                = (ConnectivityManager) mContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
+        return activeNetworkInfo != null && activeNetworkInfo.isConnected();
     }
 
     private static class ProgressResponseBody extends ResponseBody {

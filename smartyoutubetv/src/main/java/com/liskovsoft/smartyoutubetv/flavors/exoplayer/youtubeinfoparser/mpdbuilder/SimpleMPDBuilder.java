@@ -1,17 +1,19 @@
 package com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.mpdbuilder;
 
-import android.media.browse.MediaBrowser.MediaItem;
 import android.util.Xml;
 import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.ITag;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.misc.YouTubeGenericInfo;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.misc.YouTubeMediaItem;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.YouTubeSubParser.Subtitle;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.YouTubeMediaParser.GenericInfo;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.YouTubeMediaParser.MediaItem;
 import com.liskovsoft.smartyoutubetv.misc.Helpers;
 import org.xmlpull.v1.XmlSerializer;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
@@ -20,24 +22,24 @@ import java.util.regex.Pattern;
 /**
  * Demos: https://github.com/Dash-Industry-Forum/dash-live-source-simulator/wiki/Test-URLs
  */
-public class MyMPDBuilder implements MPDBuilder {
+public class SimpleMPDBuilder implements MPDBuilder {
     private static final String MIME_WEBM_AUDIO = "audio/webm";
     private static final String MIME_WEBM_VIDEO = "video/webm";
     private static final String MIME_MP4_AUDIO = "audio/mp4";
     private static final String MIME_MP4_VIDEO = "video/mp4";
-    private final YouTubeGenericInfo mInfo;
+    private final GenericInfo mInfo;
     private XmlSerializer mXmlSerializer;
     private StringWriter mWriter;
     private int mId;
-    private Set<YouTubeMediaItem> mMP4Audios;
-    private Set<YouTubeMediaItem> mMP4Videos;
-    private Set<YouTubeMediaItem> mWEBMAudios;
-    private Set<YouTubeMediaItem> mWEBMVideos;
-    private int mCounter;
+    private Set<MediaItem> mMP4Audios;
+    private Set<MediaItem> mMP4Videos;
+    private Set<MediaItem> mWEBMAudios;
+    private Set<MediaItem> mWEBMVideos;
+    private List<Subtitle> mSubs;
 
-    private class MyComparator implements Comparator<YouTubeMediaItem> {
+    private class SimpleComparator implements Comparator<MediaItem> {
         @Override
-        public int compare(YouTubeMediaItem leftItem, YouTubeMediaItem rightItem) {
+        public int compare(MediaItem leftItem, MediaItem rightItem) {
             if (leftItem.getSize() == null || rightItem.getSize() == null) {
                 return 0;
             }
@@ -59,13 +61,18 @@ public class MyMPDBuilder implements MPDBuilder {
         }
     }
 
-    public MyMPDBuilder(YouTubeGenericInfo info) {
+    public SimpleMPDBuilder() {
+        this(null);
+    }
+
+    public SimpleMPDBuilder(GenericInfo info) {
         mInfo = info;
-        MyComparator comp = new MyComparator();
+        SimpleComparator comp = new SimpleComparator();
         mMP4Audios = new TreeSet<>(comp);
         mMP4Videos = new TreeSet<>(comp);
         mWEBMAudios = new TreeSet<>(comp);
         mWEBMVideos = new TreeSet<>(comp);
+        mSubs = new ArrayList<>();
 
         initXmlSerializer();
     }
@@ -110,7 +117,7 @@ public class MyMPDBuilder implements MPDBuilder {
 
     private String extractDurationFromTrack() {
         String url = null;
-        for (YouTubeMediaItem item : mMP4Videos) {
+        for (MediaItem item : mMP4Videos) {
             url = item.getUrl();
             break; // get first item
         }
@@ -132,26 +139,41 @@ public class MyMPDBuilder implements MPDBuilder {
         writeMediaTagsForGroup(mMP4Videos);
         writeMediaTagsForGroup(mWEBMAudios);
         writeMediaTagsForGroup(mWEBMVideos);
+        writeMediaTagsForGroup(mSubs);
     }
 
-    private void writeMediaTagsForGroup(Set<YouTubeMediaItem> items) {
+    private void writeMediaTagsForGroup(List<Subtitle> subs) {
+        if (subs.size() == 0) {
+            return;
+        }
+
+        for (Subtitle sub : subs) {
+            writeMediaListPrologue(sub);
+
+            writeMediaItemTag(sub);
+
+            writeMediaListEpilogue();
+        }
+    }
+
+    private void writeMediaTagsForGroup(Set<MediaItem> items) {
         if (items.size() == 0) {
             return;
         }
 
-        YouTubeMediaItem firstItem = null;
-        for (YouTubeMediaItem item : items) {
+        MediaItem firstItem = null;
+        for (MediaItem item : items) {
             firstItem = item;
             break;
         }
         writeMediaListPrologue(String.valueOf(mId++), extractMimeType(firstItem));
 
         // Representation
-        for (YouTubeMediaItem item : items) {
+        for (MediaItem item : items) {
             writeMediaItemTag(item);
         }
 
-        endTag("", "AdaptationSet");
+        writeMediaListEpilogue();
     }
 
     private XmlSerializer attribute(String namespace, String name, String value) {
@@ -216,14 +238,32 @@ public class MyMPDBuilder implements MPDBuilder {
         attribute("", "value", "main");
         endTag("", "Role");
     }
+    
+    private void writeMediaListPrologue(Subtitle sub) {
+        String id = String.valueOf(mId++);
+
+        startTag("", "AdaptationSet");
+        attribute("", "id", id);
+        attribute("", "mimeType", sub.getMimeType());
+        attribute("", "lang", sub.getLanguageCode());
+
+        startTag("", "Role");
+        attribute("", "schemeIdUri", "urn:mpeg:DASH:role:2011");
+        attribute("", "value", "subtitle");
+        endTag("", "Role");
+    }
+
+    private void writeMediaListEpilogue() {
+        endTag("", "AdaptationSet");
+    }
 
     @Override
-    public void append(YouTubeMediaItem mediaItem) {
+    public void append(MediaItem mediaItem) {
         if (notDASH(mediaItem)) {
             return;
         }
 
-        Set<YouTubeMediaItem> placeholder = null;
+        Set<MediaItem> placeholder = null;
         String mimeType = extractMimeType(mediaItem);
         if (mimeType != null) {
             switch (mimeType) {
@@ -241,18 +281,27 @@ public class MyMPDBuilder implements MPDBuilder {
                     break;
             }
         }
+
         if (placeholder != null) {
             placeholder.add(mediaItem); // NOTE: reverse order
         }
-
-        mCounter++;
     }
 
-    private boolean notDASH(YouTubeMediaItem mediaItem) {
+    @Override
+    public void append(List<Subtitle> subs) {
+        mSubs.addAll(subs);
+    }
+
+    @Override
+    public void append(Subtitle sub) {
+        mSubs.add(sub);
+    }
+
+    private boolean notDASH(MediaItem mediaItem) {
         return mediaItem.getInit() == null;
     }
 
-    private String extractMimeType(YouTubeMediaItem item) {
+    private String extractMimeType(MediaItem item) {
         String codecs = extractCodecs(item);
 
         if (codecs.startsWith("vorbis") ||
@@ -275,7 +324,7 @@ public class MyMPDBuilder implements MPDBuilder {
         return null;
     }
 
-    private void writeMediaItemTag(YouTubeMediaItem item) {
+    private void writeMediaItemTag(MediaItem item) {
         startTag("", "Representation");
 
         attribute("", "id", item.getITag());
@@ -319,7 +368,27 @@ public class MyMPDBuilder implements MPDBuilder {
         endTag("", "Representation");
     }
 
-    private boolean isVideo(YouTubeMediaItem item) {
+    private void writeMediaItemTag(Subtitle sub) {
+        String bandwidth = "268";
+
+        startTag("", "Representation");
+
+        attribute("", "id", String.valueOf(mId));
+
+        attribute("", "bandwidth", bandwidth);
+
+        attribute("", "codecs", sub.getCodecs());
+
+        startTag("", "BaseURL");
+
+        text(sub.getBaseUrl());
+
+        endTag("", "BaseURL");
+
+        endTag("", "Representation");
+    }
+
+    private boolean isVideo(MediaItem item) {
         return item.getSize() != null;
     }
 
@@ -331,7 +400,7 @@ public class MyMPDBuilder implements MPDBuilder {
         }
     }
 
-    private String getHeight(YouTubeMediaItem item) {
+    private String getHeight(MediaItem item) {
         String size = item.getSize();
         if (size == null) {
             return "";
@@ -339,7 +408,7 @@ public class MyMPDBuilder implements MPDBuilder {
         return size.split("x")[1];
     }
 
-    private String getWidth(YouTubeMediaItem item) {
+    private String getWidth(MediaItem item) {
         String size = item.getSize();
         if (size == null) {
             return "";
@@ -347,7 +416,7 @@ public class MyMPDBuilder implements MPDBuilder {
         return size.split("x")[0];
     }
 
-    private String extractCodecs(YouTubeMediaItem item) {
+    private String extractCodecs(MediaItem item) {
         // input example: video/mp4;+codecs="avc1.640033"
         Pattern pattern = Pattern.compile(".*codecs=\\\"(.*)\\\"");
         Matcher matcher = pattern.matcher(item.getType());
@@ -368,7 +437,8 @@ public class MyMPDBuilder implements MPDBuilder {
 
     @Override
     public boolean isEmpty() {
-        return mCounter == 0;
+        return mMP4Videos.size() == 0 && mWEBMVideos.size() == 0
+                && mMP4Audios.size() == 0 && mWEBMAudios.size() == 0;
     }
 
 }

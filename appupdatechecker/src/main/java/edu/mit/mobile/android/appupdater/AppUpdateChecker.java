@@ -19,6 +19,7 @@ package edu.mit.mobile.android.appupdater;
  */
 
 import java.io.FileInputStream;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
@@ -27,6 +28,10 @@ import java.util.Iterator;
 import java.util.Map.Entry;
 import java.util.TreeMap;
 
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Toast;
+import edu.mit.mobile.android.appupdater.addons.Helpers;
 import edu.mit.mobile.android.appupdater.addons.MyDownloadManager;
 import edu.mit.mobile.android.appupdater.addons.MyDownloadManager.MyRequest;
 import org.json.JSONArray;
@@ -275,33 +280,38 @@ public class AppUpdateChecker {
                 MyRequest request = new MyRequest(Uri.parse(urlStr));
                 long reqId = manager.enqueue(request);
 
-                jo = new JSONObject(StreamUtils.inputStreamToString(manager.getStreamForDownloadedFile(reqId)));
+                InputStream content = manager.getStreamForDownloadedFile(reqId);
+                jo = new JSONObject(StreamUtils.inputStreamToString(content));
 
                 mPrefs.edit().putLong(PREF_LAST_UPDATED, System.currentTimeMillis()).apply();
+            } catch (final IllegalStateException ex) {
+                ex.printStackTrace();
+                errorMsg = Helpers.toString(ex.getCause());
             } catch (final Exception e) {
                 throw new IllegalStateException(e);
             } finally {
                 publishProgress(100);
-            } return jo;
+            }
+
+            return jo;
         }
 
         @Override
         protected void onPostExecute(JSONObject result) {
             if (result == null) {
-                Log.e(TAG, errorMsg);
+                String msg = String.format("%s: %s", TAG, errorMsg);
+                Log.e(TAG, msg);
+                Helpers.showMessage(mContext, msg);
             } else {
                 try {
                     triggerFromJson(result);
 
                 } catch (final JSONException e) {
                     Log.e(TAG, "Error in JSON version file.", e);
+                    Helpers.showMessage(mContext, e);
                 }
             }
             versionTask = null; // forget about us, we're done.
         }
-
-        ;
     }
-
-    ;
 }

@@ -3,12 +3,15 @@ package com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser;
 import android.net.Uri;
 import com.liskovsoft.smartyoutubetv.BuildConfig;
 import com.liskovsoft.smartyoutubetv.TestHelpers;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.mpdbuilder.MyMPDBuilder;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.mpdbuilder.MPDBuilder;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.mpdbuilder.SimpleMPDBuilder;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.YouTubeSubParser;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.YouTubeSubParser.Subtitle;
 import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.misc.SimpleYouTubeMediaItem;
 import com.liskovsoft.smartyoutubetv.misc.Helpers;
 import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.tmp.SimpleYouTubeInfoParser;
 import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.tmp.YouTubeInfoParser;
-import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.CipherUtils;
+import com.liskovsoft.smartyoutubetv.flavors.exoplayer.youtubeinfoparser.parser.misc.CipherUtils;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -18,11 +21,16 @@ import org.robolectric.annotation.Config;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.Charset;
+import java.util.List;
 
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertFalse;
 import static junit.framework.Assert.assertTrue;
 
+/**
+ * Fixing unable to find manifest errors.
+ * You have to set working directory to <code>$MODULE_DIR$</code>. <a href="http://robolectric.org/getting-started/">More info</a>
+ */
 @RunWith(RobolectricTestRunner.class)
 @Config(constants = BuildConfig.class)
 public class SimpleYouTubeInfoParserTest {
@@ -103,26 +111,45 @@ public class SimpleYouTubeInfoParserTest {
         assertEquals(sampleString, Helpers.toString(byteArrayInputStream));
     }
 
-    // Useless test
-    // @Test
-    // public void mpdBuilderTest() {
-    //     InputStream emptyMpd = TestHelpers.openResource("mpd_no_items");
-    //     MyMPDBuilder builder = new MyMPDBuilder(null);
-    //     String expected = Helpers.toString(emptyMpd);
-    //     assertEquals(expected, Helpers.toString(builder.build()));
-    // }
-
     @Test
     public void mpdBuilderTest2() {
         InputStream oneItem = TestHelpers.openResource("mpd_with_one_item");
+        SimpleYouTubeMediaItem fakeItem = prepareFakeVideoItem();
+        SimpleMPDBuilder fakeBuilder = new SimpleMPDBuilder(null);
+        fakeBuilder.append(fakeItem);
+        assertEquals(Helpers.toString(oneItem), Helpers.toString(fakeBuilder.build()));
+    }
+
+    private SimpleYouTubeMediaItem prepareFakeVideoItem() {
         SimpleYouTubeMediaItem fakeItem = new SimpleYouTubeMediaItem();
         fakeItem.setUrl("http://empty.url?dur=1234"); // we must setup a duration
         fakeItem.setType("video/mp4;+codecs=\"avc1.640033\"");
         fakeItem.setInit("0-759");
         fakeItem.setITag("133");
-        MyMPDBuilder fakeBuilder = new MyMPDBuilder(null);
-        fakeBuilder.append(fakeItem);
-        assertEquals(Helpers.toString(oneItem), Helpers.toString(fakeBuilder.build()));
+        return fakeItem;
+    }
+
+    @Test
+    public void getAllSubsTest() {
+        String content = TestHelpers.readResource("get_video_info_subs");
+        YouTubeSubParser parser = new YouTubeSubParser(content);
+        List<Subtitle> allSubs = parser.getAllSubs();
+        String formatKey = "fmt=vtt";
+        String expected = "https://www.youtube.com/api/timedtext?caps=&key=yttt1&expire=1515741851&v=WS7f5xpGYn8&hl=en_US&signature" +
+                "=1774F7B2CF8A652145BBED85C33EB92DD8186388.27F90A8C8C2B38844AC89AF3E62F96DDDF3471A4&xorp=True&sparams=caps%2Cv%2Cxorp%2Cexpire&lang" +
+                "=en&name=en" + "&" + formatKey;
+        assertEquals(expected, allSubs.get(0).getBaseUrl());
+    }
+
+    @Test
+    public void addSubsToMpdTest() {
+        String content = TestHelpers.readResource("get_video_info_subs");
+        YouTubeSubParser parser = new YouTubeSubParser(content);
+        List<Subtitle> allSubs = parser.getAllSubs();
+        MPDBuilder builder = new SimpleMPDBuilder();
+        builder.append(allSubs);
+        builder.append(prepareFakeVideoItem());
+        assertEquals(TestHelpers.readResource("mpd_with_one_sub2"), TestHelpers.readStream(builder.build()));
     }
 
 }
